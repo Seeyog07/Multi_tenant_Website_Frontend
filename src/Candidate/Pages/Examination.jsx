@@ -36,7 +36,7 @@ export default function Examination() {
         } catch (apiErr) {
           console.error('Error fetching finalized test from AssessmentAPI:', apiErr);
         }
-        console.log("Finalised test API result for candidate", candidateId, ":", finalisedTestResults);
+        // console.log("Finalised test API result for candidate", candidateId, ":", finalisedTestResults);
 
         if (Array.isArray(finalisedTestResults) && finalisedTestResults.length > 0) {
           // Check if the only result is a null/empty object (API: no assessment found)
@@ -45,9 +45,9 @@ export default function Examination() {
               v => v === null || v === undefined || v === ""
             );
           if (!onlyNull) {
-            console.log("Siuuu: ",
-              finalisedTestResults
-            )
+            // console.log("Siuuu: ",
+            //   finalisedTestResults
+            // )
             setJobs(finalisedTestResults.map(test => ({
               title: test.title || "Assessment",
               company: test.company,

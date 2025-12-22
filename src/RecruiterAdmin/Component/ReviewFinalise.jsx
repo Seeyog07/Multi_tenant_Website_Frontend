@@ -12,6 +12,8 @@ export default function ReviewFinalise({ formData, questions, onFinalize, onBack
 
   // Transform questions to display format
   console.log("Seeyog",questions);
+  // Log job details passed through formData
+  console.log('ReviewFinalise received jobDetails:', formData?.jobDetails || null);
   const displayQuestions = questions.map((q, idx) => {
     const content = q.content || {};
     

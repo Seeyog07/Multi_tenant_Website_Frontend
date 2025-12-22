@@ -140,6 +140,28 @@ export default function TestDetail({
   const [selectedTime, setSelectedTime] = useState(formData.startTime || null);
   const [selectedEndTime, setSelectedEndTime] = useState(formData.endTime || null);
 
+  // Prefill role title and skills from job details if not already provided
+  useEffect(() => {
+    try {
+      const job = formData.jobDetails || {};
+      const offerTitle = job?.offerId?.jobTitle || job?.jobTitle || '';
+      const jobSkills = job?.offerId?.skills || job?.skills || [];
+
+      if ((!formData.roleTitle || formData.roleTitle === '') && offerTitle) {
+        onUpdate({ roleTitle: offerTitle });
+      }
+
+      if ((!formData.skills || formData.skills.length === 0) && Array.isArray(jobSkills) && jobSkills.length > 0) {
+        const skills = jobSkills.map(s => (typeof s === 'string' ? s : String(s)));
+        const skillLevels = skills.map((skill) => ({ skill, level: 'Any', mcq: 0, coding: 0, audio: 0, video: 0 }));
+        onUpdate({ skills, skillLevels });
+      }
+    } catch (e) {
+      // ignore
+    }
+    // only run when jobDetails changes
+  }, [formData.jobDetails]);
+
   const timeSlots = [
     '10:00 AM','10:30 AM','11:00 AM','11:30 AM','12:00 PM','12:30 PM','1:00 PM',
     '2:00 PM','2:30 PM','3:00 PM','3:30 PM','4:00 PM','4:30 PM','5:00 PM'
@@ -187,12 +209,38 @@ export default function TestDetail({
     });
   };
 
+  // Helper to set a field for a skill; creates skillLevel entry if missing
+  const setSkillField = (skill, field, value) => {
+    const existing = Array.isArray(formData.skillLevels) ? formData.skillLevels : [];
+    const found = existing.find((s) => s.skill === skill);
+    let updated;
+    if (found) {
+      updated = existing.map((sl) => (sl.skill === skill ? { ...sl, [field]: value } : sl));
+    } else {
+      const base = { skill, level: 'Any', mcq: 0, coding: 0, audio: 0, video: 0 };
+      base[field] = value;
+      updated = [...existing, base];
+    }
+    onUpdate({ skillLevels: updated });
+  };
+
   const getTotalQuestions = () => {
     return formData.skillLevels.reduce(
       (sum, sl) =>
         sum + (sl.mcq || 0) + (sl.coding || 0) + (sl.audio || 0) + (sl.video || 0),
       0
     );
+  };
+
+  // Ensure required fields are present before allowing generation
+  const canGenerate = () => {
+    // role title must be provided
+    if (!formData.roleTitle || String(formData.roleTitle).trim() === '') return false;
+    // at least one skill
+    if (!formData.skills || !Array.isArray(formData.skills) || formData.skills.length === 0) return false;
+    // schedule must be set
+    if (!formData.startDate || !formData.endDate || !formData.startTime || !formData.endTime) return false;
+    return true;
   };
 
   // AUTOMATICALLY TOGGLE START/END DATE SELECTION
@@ -233,7 +281,7 @@ export default function TestDetail({
           </label>
           <input
             type="text"
-            value={formData.roleTitle}
+            value={formData.roleTitle || formData.jobDetails?.offerId?.jobTitle || formData.jobDetails?.jobTitle || ''}
             onChange={(e) => onUpdate({ roleTitle: e.target.value })}
             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 outline-none transition"
             placeholder="e.g., UI/UX Designer"
@@ -276,7 +324,7 @@ export default function TestDetail({
         </div>
 
         {/* EXPERIENCE */}
-        <div className="mb-4">
+        {/* <div className="mb-4">
           <label className="block text-xs sm:text-sm font-semibold text-gray-900 mb-2">
             Experience (in years)
           </label>
@@ -287,10 +335,10 @@ export default function TestDetail({
             onChange={(e) => onUpdate({ experience: e.target.value })}
             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 outline-none transition"
           />
-        </div>
+        </div> */}
 
         {/* WORK ARRANGEMENT */}
-        <div className="mb-4">
+        {/* <div className="mb-4">
           <label className="block text-xs sm:text-sm font-semibold text-gray-900 mb-2">
             Work Arrangement
           </label>
@@ -304,10 +352,10 @@ export default function TestDetail({
             <option value="on-site">On-Site</option>
             <option value="hybrid">Hybrid</option>
           </select>
-        </div>
+        </div> */}
 
         {/* LOCATION */}
-        <div className="mb-4">
+        {/* <div className="mb-4">
           <label className="block text-xs sm:text-sm font-semibold text-gray-900 mb-2">
             Location
           </label>
@@ -318,10 +366,10 @@ export default function TestDetail({
             onChange={(e) => onUpdate({ location: e.target.value })}
             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 outline-none transition"
           />
-        </div>
+        </div> */}
 
         {/* COMPENSATION RANGE */}
-        <div className="mb-4">
+        {/* <div className="mb-4">
           <label className="block text-xs sm:text-sm font-semibold text-gray-900 mb-2">
             Annual Compensation (INR)
           </label>
@@ -341,7 +389,7 @@ export default function TestDetail({
               className="w-1/2 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-500 outline-none transition"
             />
           </div>
-        </div>
+        </div> */}
 
         {/* SCHEDULE BUTTON */}
         <div className="mt-4">
@@ -373,38 +421,37 @@ export default function TestDetail({
                 </tr>
               </thead>
               <tbody>
-                {formData.skillLevels.map((sl) => (
-                  <tr key={sl.skill}>
-                    <td className="px-4 py-3">{sl.skill}</td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={sl.level}
-                        onChange={(e) =>
-                          updateSkillLevel(sl.skill, 'level', e.target.value)
-                        }
-                        className="border px-2 py-1 rounded"
-                      >
-                        <option>Any</option>
-                        <option>Beginner</option>
-                        <option>Medium</option>
-                        <option>Advanced</option>
-                      </select>
-                    </td>
-                    {['mcq','coding','audio','video'].map((field) => (
-                      <td key={field} className="px-4 py-3">
-                        <input
-                          type="number"
-                          min="0"
-                          value={sl[field] || 0}
-                          onChange={(e) =>
-                            updateSkillLevel(sl.skill, field, parseInt(e.target.value) || 0)
-                          }
-                          className="w-16 text-center border rounded px-2 py-1"
-                        />
+                {formData.skills.map((skill) => {
+                  const sl = (formData.skillLevels || []).find((s) => s.skill === skill) || { skill, level: 'Any', mcq: 0, coding: 0, audio: 0, video: 0 };
+                  return (
+                    <tr key={skill}>
+                      <td className="px-4 py-3">{skill}</td>
+                      <td className="px-4 py-3">
+                        <select
+                          value={sl.level}
+                          onChange={(e) => setSkillField(skill, 'level', e.target.value)}
+                          className="border px-2 py-1 rounded"
+                        >
+                          <option>Any</option>
+                          <option>Beginner</option>
+                          <option>Medium</option>
+                          <option>Advanced</option>
+                        </select>
                       </td>
-                    ))}
-                  </tr>
-                ))}
+                      {['mcq','coding','audio','video'].map((field) => (
+                        <td key={field} className="px-4 py-3">
+                          <input
+                            type="number"
+                            min="0"
+                            value={sl[field] || 0}
+                            onChange={(e) => setSkillField(skill, field, parseInt(e.target.value) || 0)}
+                            className="w-16 text-center border rounded px-2 py-1"
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -420,7 +467,7 @@ export default function TestDetail({
               </button>
               <button
                 onClick={onNext}
-                disabled={loading || getTotalQuestions() === 0}
+                disabled={!canGenerate() || loading || getTotalQuestions() === 0}
                 className="px-5 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300"
               >
                 {loading ? 'Generating...' : 'Generate'}

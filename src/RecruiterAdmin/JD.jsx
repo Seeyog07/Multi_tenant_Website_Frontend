@@ -35,7 +35,7 @@ function JD() {
         }
       });
 
-      console.log('JDs Data:', response.data);
+      console.log('Main JDs Data:', response.data);
 
       if (response.data.success && response.data.data) {
         const data = response.data.data;
@@ -220,12 +220,15 @@ function JD() {
                         </td>
                         <td className="py-4 px-6">
                           <button
-                            onClick={() => navigate("/RecruiterAdmin-Dashboard/NonCandidateList", { state: { jdId: row._id } })}
-                            className="p-1 border border-blue-500 rounded-lg transition-colors"
-                            aria-label="View"
-                          >
-                            <ShareIcon className="w-4 h-4 text-blue-600" />
-                          </button>
+                              onClick={() => {
+                                console.log('Navigating to NonCandidateList with JD:', row);
+                                navigate("/RecruiterAdmin-Dashboard/NonCandidateList", { state: { jdId: row._id, jdData: row } });
+                              }}
+                              className="p-1 border border-blue-500 rounded-lg transition-colors"
+                              aria-label="View"
+                            >
+                              <ShareIcon className="w-4 h-4 text-blue-600" />
+                            </button>
                         </td>
                       </tr>
                     ))

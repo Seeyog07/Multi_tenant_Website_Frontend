@@ -40,7 +40,7 @@ const CandidateDashboard = () => {
                         Authorization: `Bearer ${token}`,
                     },
                 });
-                console.log("Candidate data:", res.data);
+                // console.log("Candidate data:", res.data);
                 if (res.data?.success && res.data?.data) {
                     const userData = res.data.data;
                     const name = userData.name || userData.fullName || userData.firstName || userData.username || userData.email?.split('@')[0] || "Candidate";
@@ -62,7 +62,7 @@ const CandidateDashboard = () => {
                         Authorization: `Bearer ${localStorage.getItem("candidateToken")}`,
                     },
                 });
-                console.log("applied jobs", res.data);
+                // console.log("applied jobs", res.data);
                 if (res.data?.success) {
                     setAppliedJobs(res.data.jobs || []);
                 }
@@ -82,7 +82,7 @@ const CandidateDashboard = () => {
                         Authorization: `Bearer ${localStorage.getItem("candidateToken")}`,
                     },
                 });
-                console.log("jd-counts", res.data?.counts);
+                // console.log("jd-counts", res.data?.counts);
                 if (res.data?.counts) {
                     setJdCounts(res.data.counts);
                 }
@@ -102,7 +102,7 @@ const CandidateDashboard = () => {
                         Authorization: `Bearer ${localStorage.getItem("candidateToken")}`,
                     },
                 });
-                console.log("latest-five-jds", res.data);
+                // console.log("latest-five-jds", res.data);
                 if (res.data?.success) {
                     setLatestJobs(res.data.data || []);
                 }

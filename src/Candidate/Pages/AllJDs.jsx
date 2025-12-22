@@ -31,7 +31,7 @@ const AllJDs = () => {
                     }
                 });
 
-                console.log('JDs Data:', response.data);
+                console.log('ALLJDs Data:', response.data);
 
                 if (response.data.success && response.data.data) {
                     const mappedData = response.data.data

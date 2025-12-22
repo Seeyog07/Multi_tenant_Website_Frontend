@@ -13,11 +13,20 @@ function GenerateAssessment() {
   const filteredCandidates = location.state?.filteredCandidates || [];
   console.log("Filtered candidates received:", filteredCandidates);
 
-  // Load selected JD from localStorage
+  // Prefer JD passed via navigation state; fallback to localStorage
+  const jdFromLocation = location.state?.jdData || null;
   const [selectedJD, setSelectedJD] = useState(() => {
-    const saved = localStorage.getItem("selectedJD");
-    return saved ? JSON.parse(saved) : null;
+    if (jdFromLocation) return jdFromLocation;
+    try {
+      const saved = localStorage.getItem("selectedJD");
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
   });
+
+  // Log selected JD for debugging
+  console.log('Selected JD in GenerateAssessment:', selectedJD);
 
   // Prefill formData with selected JD info if available, using full payload structure
   const [formData, setFormData] = useState({
@@ -47,6 +56,7 @@ function GenerateAssessment() {
     duration: 0,
     questions: [],
     candidates: filteredCandidates,
+    jobDetails: selectedJD,
     skillLevels: [],
   });
 
@@ -134,6 +144,8 @@ function GenerateAssessment() {
       payload.job_id = formData.job_id || selectedJD?._id || null;
       payload.questionSetId = formData.questionSetId || (questions.length > 0 ? 'set_' + Math.random().toString(36).substr(2, 9) : '');
       payload.created_at = new Date();
+      // include full job details if available
+      payload.jobDetails = formData.jobDetails || selectedJD || null;
 
       console.log('Finalize payload:', payload);
 
@@ -221,12 +233,20 @@ function GenerateAssessment() {
       )}
 
       {loading && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-xl flex items-center space-x-3">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            <p className="text-gray-700 font-medium">
-              {currentStep === 1 ? 'Generating questions...' : 'Finalizing test...'}
-            </p>
+        <div className="fixed inset-0 z-50 pointer-events-auto flex items-center justify-center">
+          <div className="absolute inset-0 bg-white/30 backdrop-blur-sm" />
+
+          <div className="relative z-10 bg-white/80 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl p-6 flex items-center gap-4 max-w-md mx-4">
+            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-br from-blue-100 to-blue-200">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500" />
+            </div>
+
+            <div>
+              <p className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+                {currentStep === 1 ? 'Generating questions' : 'Finalizing test'}
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">This may take a few moments — we&apos;re preparing the assessment.</p>
+            </div>
           </div>
         </div>
       )}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Webcam from 'react-webcam';
 import { useParams } from 'react-router-dom';
 import { testApi } from '../../RecruiterAdmin/api/tests.js';
 import McqQuestion from '../../RecruiterAdmin/Component/McqQuestion.jsx';
@@ -11,6 +12,7 @@ import ActivityMonitor from '../instructions_page/ActivityMonitor.jsx';
 import FaceDetection from '../instructions_page/FaceDetection.jsx';
 import WebCamRecorder from '../instructions_page/WebCamRecorder.jsx';
 import AudioInterview from '../instructions_page/AudioInterview.jsx'; // adjust the path as needed
+import WebcamPreview from '../Component/WebcamPreview.jsx';
 import { emitViolation } from '../../RecruiterAdmin/api/socket.js';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -38,14 +40,30 @@ const GiveTest = ({ jdId }) => {
     email: `candidate_${finalCandidateId}@mail.com`,
   });
   const [mediaAllowed, setMediaAllowed] = useState(false);
+  const [localStream, setLocalStream] = useState(null);
+  const streamRef = useRef(null);
+  const videoRef = useRef(null);
+  const webcamRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [floatingPos, setFloatingPos] = useState({ x: 20, y: 80 });
+  const [isVideoPlaying, setIsVideoPlaying] = useState(true);
+  const [hasVideoFrame, setHasVideoFrame] = useState(false);
+  const dragRef = useRef({ dragging: false, offsetX: 0, offsetY: 0 });
+  const [tabSwitches, setTabSwitches] = useState(0);
   const faceEventRef = useRef(null);
   const webcamInterviewRef = useRef(null);
   const [showWebcamInterview, setShowWebcamInterview] = useState(false);
   const [showAudioInterview, setShowAudioInterview] = useState(false);
   const [audioInterviewResults, setAudioInterviewResults] = useState([]);
+  const [audioInterviewDone, setAudioInterviewDone] = useState(false);
+  const [audioInterviewVisited, setAudioInterviewVisited] = useState(false);
   const [step, setStep] = useState('entry');
   const [instructionsVisible, setInstructionsVisible] = useState(true);
   const [testStarted, setTestStarted] = useState(false);
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [camEnabled, setCamEnabled] = useState(true);
+  const [videoDevices, setVideoDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
 
   // Violations tracking
   const [violations, setViolations] = useState({
@@ -60,17 +78,328 @@ const GiveTest = ({ jdId }) => {
     violationsRef.current = violations;
   }, [violations]);
 
+  // attach localStream to video element and cleanup on unmount
+  useEffect(() => {
+    const targetVideo = (webcamRef.current && webcamRef.current.video) || videoRef.current;
+    if (targetVideo && localStream) {
+      try { targetVideo.srcObject = localStream; videoRef.current = targetVideo; } catch (e) { console.warn('attach srcObject failed', e); }
+    }
+    return () => {
+      if (localStream) {
+        try { localStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+      }
+    };
+  }, [localStream]);
+
+  // track whether <video> is actually playing so we can hide canvas fallback
+  useEffect(() => {
+    const v = videoRef.current || (webcamRef.current && webcamRef.current.video);
+    if (!v) return;
+    const onPlaying = () => setIsVideoPlaying(true);
+    const onPause = () => setIsVideoPlaying(false);
+    v.addEventListener('playing', onPlaying);
+    v.addEventListener('play', onPlaying);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('ended', onPause);
+    return () => {
+      try {
+        v.removeEventListener('playing', onPlaying);
+        v.removeEventListener('play', onPlaying);
+        v.removeEventListener('pause', onPause);
+        v.removeEventListener('ended', onPause);
+      } catch (e) {}
+    };
+  }, [videoRef.current]);
+
+  // Poll video element to detect whether frames are available (videoWidth>0)
+  useEffect(() => {
+    let intId = null;
+    const check = () => {
+      const v = videoRef.current || (webcamRef.current && webcamRef.current.video);
+      if (v) {
+        const hasFrame = !!(v.videoWidth && v.videoHeight);
+        setHasVideoFrame(hasFrame);
+        if (hasFrame) return true;
+      }
+      return false;
+    };
+    // run a few times for up to ~2s
+    let attempts = 0;
+    intId = setInterval(() => {
+      attempts += 1;
+      const ok = check();
+      if (ok || attempts > 10) {
+        clearInterval(intId);
+      }
+    }, 200);
+    // immediate check
+    check();
+    return () => { if (intId) clearInterval(intId); };
+  }, [localStream, mediaAllowed, step, streamRef.current]);
+
   // Request camera+mic permissions
   const requestMedia = async () => {
+    // Prefer a stream granted earlier in CameraCheck (same tab) to avoid re-prompt
     try {
-      await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const existing = window.__candidateCameraStream;
+      if (existing) {
+        setMediaAllowed(true);
+        setLocalStream(existing);
+        streamRef.current = existing;
+        if (videoRef.current) {
+          try { videoRef.current.srcObject = existing; } catch (e) { console.warn('attach existing stream failed', e); }
+        }
+        return;
+      }
+      const constraints = {
+        video: camEnabled ? (selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: 'user' }) : false,
+        audio: micEnabled,
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       setMediaAllowed(true);
+      setLocalStream(stream);
+      streamRef.current = stream;
+      // also save globally for future pages in same tab
+      try { window.__candidateCameraStream = stream; window.__cameraAllowed = true; } catch (e) {}
+      if (videoRef.current) {
+        try { videoRef.current.srcObject = stream; } catch (e) { console.warn('set srcObject failed', e); }
+      }
     } catch (err) {
       console.error('Media permissions denied:', err);
       setMediaAllowed(false);
       alert('Please allow camera and microphone access to continue the test.');
     }
   };
+
+  // On mount, reuse stream from CameraCheck if available
+  useEffect(() => {
+    try {
+      const existing = window.__candidateCameraStream;
+      if (existing && !localStream) {
+        setMediaAllowed(true);
+        setLocalStream(existing);
+        streamRef.current = existing;
+        if (videoRef.current) {
+          try { videoRef.current.srcObject = existing; } catch (e) { console.warn('attach existing on mount failed', e); }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  // Enumerate devices and prefer a saved device if present
+  useEffect(() => {
+    const list = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const vids = devices.filter(d => d.kind === 'videoinput');
+        setVideoDevices(vids);
+        if (!selectedDeviceId && vids.length) setSelectedDeviceId(vids[0].deviceId);
+      } catch (e) {}
+    };
+    list();
+  }, []);
+
+  // Poll for a global stream (if set by CameraCheck in another part of the app)
+  useEffect(() => {
+    let pollId = null;
+    const tryAttachGlobal = () => {
+      try {
+        const existing = window.__candidateCameraStream;
+        if (existing) {
+          streamRef.current = existing;
+          setLocalStream(existing);
+          setMediaAllowed(true);
+          if (videoRef.current && videoRef.current.srcObject !== existing) {
+            try { videoRef.current.srcObject = existing; const p = videoRef.current.play && videoRef.current.play(); if (p && p.then) p.catch(()=>{}); } catch (e) { console.warn('attach global stream failed', e); }
+          }
+          if (pollId) { clearInterval(pollId); pollId = null; }
+        }
+      } catch (e) {}
+    };
+
+    tryAttachGlobal();
+    if (!streamRef.current) pollId = setInterval(tryAttachGlobal, 300);
+    return () => { if (pollId) clearInterval(pollId); };
+  }, []);
+
+  // Auto-request media once when the test actually starts (safeguard against missing CameraCheck flow)
+  const _requestedMediaRef = useRef(false);
+  useEffect(() => {
+    if (testStarted && !mediaAllowed && !_requestedMediaRef.current) {
+      _requestedMediaRef.current = true;
+      // attempt to reuse existing or prompt user
+      requestMedia();
+    }
+  }, [testStarted, mediaAllowed]);
+
+  // Attempt to attach any available stream to the preview video whenever relevant state changes
+  useEffect(() => {
+    try {
+      const candidateStream = streamRef.current || localStream || window.__candidateCameraStream;
+      if (!candidateStream) {
+        console.log('GiveTest: no candidate stream available to attach');
+        return;
+      }
+
+      const vElem = (videoRef.current) || (webcamRef.current && webcamRef.current.video);
+      if (!vElem) {
+        console.log('GiveTest: preview video element not mounted yet');
+        return;
+      }
+
+      // attach if not already attached
+      if (vElem.srcObject !== candidateStream) {
+        try {
+          vElem.srcObject = candidateStream;
+          // attempt to play (some browsers require explicit play call)
+          const p = vElem.play && vElem.play();
+          if (p && p.then) p.then(() => {}).catch(()=>{});
+          setMediaAllowed(true);
+          videoRef.current = vElem; // ensure other code uses this concrete element
+          console.log('GiveTest: attached candidate stream to preview; stream active=', !!candidateStream.active);
+        } catch (e) {
+          console.warn('GiveTest: failed to attach candidate stream to preview', e);
+        }
+      } else {
+        console.log('GiveTest: preview already attached to stream');
+      }
+    } catch (e) {
+      console.warn('GiveTest: attach effect error', e);
+    }
+  }, [localStream, testStarted, mediaAllowed, step]);
+
+  // Canvas fallback: draw frames from the video element into canvas if video isn't rendering
+  useEffect(() => {
+    let rafId = null;
+    let imgCapInterval = null;
+    let offscreenVideo = null;
+    const c = canvasRef.current;
+    const v = videoRef.current || (webcamRef.current && webcamRef.current.video);
+
+    const drawFromVideo = (videoEl) => {
+      try {
+        if (c && videoEl && (videoEl.readyState >= 2 || videoEl.videoWidth)) {
+          const ctx = c.getContext('2d');
+          const w = (c.width = c.clientWidth || 360);
+          const h = (c.height = c.clientHeight || 260);
+          try {
+            ctx.drawImage(videoEl, 0, 0, w, h);
+            // mark that we have a frame so UI can hide black video
+            setHasVideoFrame(true);
+          } catch (e) {}
+        }
+      } catch (e) {}
+      rafId = requestAnimationFrame(() => drawFromVideo(videoEl));
+    };
+
+    const startImageCaptureLoop = (stream) => {
+      try {
+        const track = stream.getVideoTracks && stream.getVideoTracks()[0];
+        if (!track) return;
+        const ImageCapture = window.ImageCapture || null;
+        if (!ImageCapture) return;
+        const ic = new ImageCapture(track);
+        imgCapInterval = setInterval(async () => {
+          try {
+            const bitmap = await ic.grabFrame();
+            if (bitmap && c) {
+              const ctx = c.getContext('2d');
+              const w = c.width = c.clientWidth || bitmap.width || 360;
+              const h = c.height = c.clientHeight || bitmap.height || 260;
+              try { ctx.drawImage(bitmap, 0, 0, w, h); } catch (e) {}
+              try { bitmap.close && bitmap.close(); } catch (e) {}
+            }
+          } catch (err) {
+            // grabFrame can fail on some browsers/devices; ignore
+          }
+        }, 700);
+      } catch (e) {}
+    };
+
+    // Start drawing only if there is any candidate stream available
+    const hasStream = streamRef.current || localStream || window.__candidateCameraStream;
+    if (hasStream && c) {
+      try {
+        c.width = c.clientWidth || 360;
+        c.height = c.clientHeight || 260;
+      } catch (e) {}
+
+      // If video element is playing/rendering frames, draw from it.
+      if (v && isVideoPlaying) {
+        drawFromVideo(v);
+      } else if (v) {
+        // video exists but not playing; still start raf draw to catch frames when available
+        rafId = requestAnimationFrame(() => drawFromVideo(v));
+      } else {
+        // Visible video isn't mounted yet; create an offscreen video attached to the stream
+        try {
+          const candidateStream = streamRef.current || localStream || window.__candidateCameraStream;
+          if (candidateStream) {
+            offscreenVideo = document.createElement('video');
+            offscreenVideo.muted = true;
+            offscreenVideo.playsInline = true;
+            try {
+              offscreenVideo.srcObject = candidateStream;
+            } catch (e) {
+              console.warn('offscreen assign srcObject failed', e);
+            }
+            // try to play; some browsers require user gesture but play() may still resolve
+            const p = offscreenVideo.play && offscreenVideo.play();
+            if (p && p.then) p.catch(()=>{});
+            // start RAF draws from the offscreen element
+            rafId = requestAnimationFrame(() => drawFromVideo(offscreenVideo));
+          }
+        } catch (e) {
+          console.warn('failed to create offscreen video fallback', e);
+        }
+      }
+
+      // Also start ImageCapture fallback to grab frames directly from the track
+      const candidateStream = streamRef.current || localStream || window.__candidateCameraStream;
+      if (candidateStream) startImageCaptureLoop(candidateStream);
+    }
+
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      if (imgCapInterval) clearInterval(imgCapInterval);
+      try {
+        if (offscreenVideo) {
+          offscreenVideo.pause();
+          try { offscreenVideo.srcObject = null; } catch (e) {}
+          offscreenVideo = null;
+        }
+      } catch (e) {}
+    };
+  }, [localStream, mediaAllowed, step]);
+
+  // Always log mount for diagnostics
+  useEffect(() => {
+    try {
+      console.groupCollapsed('GiveTest Mounted');
+      console.log('step', step, 'testStarted', testStarted, 'mediaAllowed', mediaAllowed);
+      console.log('window.__candidateCameraStream present:', !!window.__candidateCameraStream);
+      console.groupEnd();
+    } catch (e) { console.warn('mount log failed', e); }
+  }, []);
+
+  // Auto-start test when GiveTest mounts (ensure monitoring and preview activate)
+  useEffect(() => {
+    setTestStarted(true);
+  }, []);
+
+  // Log whenever localStream changes
+  useEffect(() => {
+    try {
+      console.groupCollapsed('GiveTest Stream Update');
+      console.log('localStream set?', !!localStream);
+      console.log('streamRef.current', streamRef.current);
+      console.log('videoRef.current', videoRef.current);
+      console.groupEnd();
+    } catch (e) { console.warn('stream log failed', e); }
+  }, [localStream]);
 
   // Cleanup webcam on unload
   useEffect(() => {
@@ -81,6 +410,14 @@ const GiveTest = ({ jdId }) => {
         } catch (err) {
           console.warn('Cleanup webcam error:', err);
         }
+      }
+      try {
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
+      } catch (e) {
+        // ignore
       }
     };
     window.addEventListener('beforeunload', stopCamOnExit);
@@ -120,6 +457,48 @@ const GiveTest = ({ jdId }) => {
     };
   }, [testStarted, submitted]);
 
+  // Track visibility/tab switches and auto-submit after threshold
+  useEffect(() => {
+    const onVisibility = () => {
+      if (!testStarted || submitted) return;
+      if (document.hidden) {
+        setTabSwitches(prev => {
+          const next = prev + 1;
+          try { handleViolation('tab_switches', 1); } catch (e) {}
+          if (next > 3) {
+            toast.error('Too many tab switches — submitting the test.');
+            // submit immediately
+            try { handleSubmitAllSections(); } catch (e) { console.warn('submit failed', e); }
+          }
+          return next;
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [testStarted, submitted]);
+
+  // Consolidated debug logger for component state — use DevTools or button below
+  const logDebugState = () => {
+    try {
+      console.groupCollapsed('GiveTest Debug State');
+      console.log('mediaAllowed:', mediaAllowed);
+      console.log('testStarted:', testStarted, 'submitted:', submitted);
+      console.log('tabSwitches:', tabSwitches);
+      console.log('floatingPos:', floatingPos);
+      console.log('sections.length:', sections.length, 'currentSectionIndex:', currentSectionIndex, 'currentQuestionIndex:', currentQuestionIndex);
+      console.log('localStream:', localStream);
+      console.log('streamRef.current:', streamRef.current);
+      console.log('videoRef.current:', videoRef.current);
+      console.log('video.srcObject:', videoRef.current ? videoRef.current.srcObject : null);
+      console.log('allAnswers keys:', Object.keys(allAnswers || {}).length);
+      console.groupEnd();
+    } catch (e) {
+      console.warn('logDebugState failed', e);
+    }
+  };
+
   // Disable text selection & copy while test active
   useEffect(() => {
     if (!testStarted || submitted) return;
@@ -141,9 +520,9 @@ const GiveTest = ({ jdId }) => {
     const fetchTest = async () => {
       try {
         setLoading(true);
-        console.log("Question ID:", questionSetId)
+        // console.log("Question ID:", questionSetId)
         const data = await testApi.startTest(questionSetId);
-        console.log("Fetched test data:", data);
+        // console.log("Fetched test data:", data);
 
         const mcqQuestions = data.questions.filter(q => q.type === "mcq");
         const codingQuestions = data.questions.filter(q => q.type === "coding");
@@ -211,6 +590,12 @@ const GiveTest = ({ jdId }) => {
   const currentQuestion = currentSection?.questions[currentQuestionIndex];
   const totalQuestionsInSection = currentSection?.questions.length || 0;
 
+  // clamp percent to [0,100] and compute section progress percent
+  const clampPercent = (v) => Math.max(0, Math.min(100, v));
+  const sectionPercent = totalQuestionsInSection
+    ? clampPercent(Math.round(((currentQuestionIndex + 1) / totalQuestionsInSection) * 100))
+    : 0;
+
   // Handle single-question answer change
   const handleAnswerChange = (answer) => {
     if (!currentQuestion) return;
@@ -229,7 +614,8 @@ const GiveTest = ({ jdId }) => {
       setCurrentSectionIndex(prev => prev + 1);
       setCurrentQuestionIndex(0);
     } else {
-      handleSubmitAllSections();
+      // Removed automatic submit from navigation. Submissions are now triggered by section-specific actions (audio/video Upload & Submit).
+      toast.info('Please complete the section actions (Upload & Submit) to finish the test.');
     }
   };
 
@@ -245,11 +631,12 @@ const GiveTest = ({ jdId }) => {
   };
 
   // Submit all sections
-  const handleSubmitAllSections = async () => {
+  const handleSubmitAllSections = async (answersOverride) => {
     setSubmitting(true);
     try {
       const results = [];
       for (const section of sections) {
+        const answersSource = answersOverride || allAnswers;
         const responses = section.questions.map((question) => ({
           question_id: question.id,
           question_type: question.type,
@@ -264,7 +651,7 @@ const GiveTest = ({ jdId }) => {
             question.content?.correct_answer ||
             "N/A",
 
-          candidate_answer: allAnswers[question.id] || '',
+          candidate_answer: answersSource[question.id] || '',
         }));
 
         const submissionData = {
@@ -275,9 +662,10 @@ const GiveTest = ({ jdId }) => {
         };
 
         // Debug logs (helpful during integration)
-        console.log(`Submitting section ${section.name}`, submissionData);
+        console.log('Submitting section', section.name, 'with questionSetId=', questionSetId);
+        console.log('submissionData.question_set_id=', submissionData.question_set_id);
 
-        const result = await testApi.submitSection(submissionData);
+        const result = await testApi.submitSection(questionSetId, submissionData);
         results.push({ sectionName: section.name, result });
       }
 
@@ -468,7 +856,7 @@ const GiveTest = ({ jdId }) => {
           </div>
 
           <button
-            onClick={() => (window.location.href = '/')}
+            onClick={() => (window.location.href = '/Candidate-Dashboard')}
             className="mt-8 w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors font-semibold"
           >
             Done
@@ -488,10 +876,19 @@ const GiveTest = ({ jdId }) => {
         baseUrl={window.REACT_APP_BASE_URL || 'http://127.0.0.1:5000'}
         onClose={() => setShowAudioInterview(false)}
         onComplete={(qa) => {
-          setAudioInterviewResults(qa);
-          setShowAudioInterview(false);
-          toast.success('Audio interview completed.');
-        }}
+            setAudioInterviewResults(qa);
+            // merge audio answers into main answers map so submit includes them
+            setAllAnswers(prev => {
+              const next = { ...prev };
+              (qa || []).forEach(item => {
+                if (item && item.questionId) next[item.questionId] = item.answer || '';
+              });
+              return next;
+            });
+            setShowAudioInterview(false);
+            setAudioInterviewDone(true);
+            toast.success('Audio interview completed.');
+          }}
       />
     );
   }
@@ -525,6 +922,44 @@ const GiveTest = ({ jdId }) => {
 
       {!submitted && <FaceDetection faceEventRef={faceEventRef} />}
 
+      {/* Quick button to trigger camera permissions if preview missing */}
+      {!submitted && step === 'test' && !mediaAllowed && (
+        <div className="fixed top-24 right-4 z-40">
+          <button
+            onClick={requestMedia}
+            className="px-3 py-2 bg-yellow-500 text-white rounded shadow"
+          >
+            Enable Camera Preview
+          </button>
+        </div>
+      )}
+
+      {/* Manual debug logger button */}
+      {!submitted && step === 'test' && (
+        <div className="fixed top-48 right-4 z-40">
+          <button
+            onClick={logDebugState}
+            className="px-3 py-2 bg-indigo-600 text-white rounded shadow"
+          >
+            Log Debug State
+          </button>
+        </div>
+      )}
+
+      {/* Floating draggable webcam preview (candidate) - rendered during test step or while testStarted */}
+      {!submitted && (step === 'test' || testStarted || mediaAllowed || !!window.__candidateCameraStream) && (
+        <WebcamPreview
+          webcamRef={webcamRef}
+          canvasRef={canvasRef}
+          localStream={localStream}
+          streamRef={streamRef}
+          hasVideoFrame={hasVideoFrame}
+          floatingPos={floatingPos}
+          setFloatingPos={setFloatingPos}
+          selectedDeviceId={selectedDeviceId}
+        />
+      )}
+      
       <div className="min-h-screen bg-gray-100 py-8">
         <div className="max-w-4xl mx-auto px-4">
           {/* Section Header */}
@@ -555,13 +990,13 @@ const GiveTest = ({ jdId }) => {
             <div className="mb-2">
               <div className="flex justify-between text-sm text-gray-600 mb-1">
                 <span>Section Progress</span>
-                <span>{currentQuestionIndex + 1} / {totalQuestionsInSection}</span>
+                <span>{sectionPercent}%</span>
               </div>
               <div className="bg-gray-200 rounded-full h-2">
                 <div
                   className="bg-blue-600 h-2 rounded-full transition-all duration-300"
                   style={{
-                    width: `${((currentQuestionIndex + 1) / (totalQuestionsInSection || 1)) * 100}%`,
+                    width: `${sectionPercent}%`,
                   }}
                 />
               </div>
@@ -638,7 +1073,7 @@ const GiveTest = ({ jdId }) => {
                     }
 
                     // Normal audio interview button/modal
-                    return showAudioInterview ? (
+                      return showAudioInterview ? (
                       <AudioInterview
                         questions={currentSection?.questions || []}
                         candidateId={finalCandidateId}
@@ -647,16 +1082,21 @@ const GiveTest = ({ jdId }) => {
                         onComplete={(qa) => {
                           setAudioInterviewResults(qa);
                           setShowAudioInterview(false);
+                          setAudioInterviewDone(true);
                           toast.success('Audio interview completed.');
                         }}
                       />
                     ) : (
                       <div className="bg-white rounded-lg shadow-md p-6">
                         <button
-                          onClick={() => setShowAudioInterview(true)}
-                          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                          onClick={() => {
+                            setAudioInterviewVisited(true);
+                            setShowAudioInterview(true);
+                          }}
+                          disabled={audioInterviewDone}
+                          className={`px-6 py-3 rounded-lg transition ${audioInterviewDone ? 'bg-gray-400 text-white cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
                         >
-                          🎙 Start Audio Interview
+                          {audioInterviewDone ? 'Audio Completed' : '🎙 Start Audio Interview'}
                         </button>
                       </div>
                     );
@@ -680,26 +1120,30 @@ const GiveTest = ({ jdId }) => {
 
                         <WebCamRecorder
                           ref={webcamInterviewRef}
-                          question={currentQuestion}
+                          questions={currentSection?.questions || []}
                           candidateId={finalCandidateId}
                           questionSetId={questionSetId}
                           baseUrl={window.REACT_APP_BASE_URL || 'http://127.0.0.1:5000'}
-                        />
-
-                        <button
-                          onClick={async () => {
-                            webcamInterviewRef.current?.endInterview();
-
-                            setTimeout(async () => {
-                              await webcamInterviewRef.current?.uploadRecording();   // upload first
-                              webcamInterviewRef.current?.stopAll();
-                              handleSubmitAllSections();                             // submit test AFTER upload
-                            }, 1000);
+                          onComplete={(qa_payload) => {
+                            console.log('GiveTest: received qa_payload from WebCamRecorder:', qa_payload);
+                            // merge returned QA into allAnswers
+                            if (qa_payload && Array.isArray(qa_payload)) {
+                              // build merged answers object immediately and submit using it
+                              const merged = { ...(allAnswers || {}) };
+                              qa_payload.forEach(item => {
+                                if (item && item.question_id) merged[item.question_id] = item.answer || '';
+                              });
+                              console.log('GiveTest: merged answers (will submit):', merged);
+                              setAllAnswers(merged);
+                              // ensure recorder stopped and submit using merged answers to avoid stale state
+                              try { webcamInterviewRef.current?.stopAll(); } catch (e) {}
+                              handleSubmitAllSections(merged);
+                            } else {
+                              try { webcamInterviewRef.current?.stopAll(); } catch (e) {}
+                              handleSubmitAllSections();
+                            }
                           }}
-                          className="mt-6 w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition"
-                        >
-                          Submit Test
-                        </button>
+                        />
                       </div>
                     ) : (
 
@@ -728,34 +1172,38 @@ const GiveTest = ({ jdId }) => {
             </div>
           )}
 
-          {/* Navigation */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex justify-between items-center">
-              <button
-                onClick={handlePrevious}
-                disabled={currentQuestionIndex === 0}
-                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Previous
-              </button>
+          {/* Navigation - hidden for Video section (recorder handles navigation & submission) */}
+          {currentSection?.type !== 'video' && (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <div className="flex justify-between items-center">
+                {currentSection?.type !== 'video' && (
+                  <button
+                    onClick={handlePrevious}
+                    disabled={currentQuestionIndex === 0}
+                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Previous
+                  </button>
+                )}
 
-              <div className="text-sm text-gray-600 text-center">
-                {currentQuestionIndex === totalQuestionsInSection - 1 &&
-                 currentSectionIndex === sections.length - 1 ? (
-                  <span className="font-medium text-blue-600">
-                    Final submission - All sections will be submitted
-                  </span>
-                ) : currentQuestionIndex === totalQuestionsInSection - 1 ? (
-                  <div>
-                    <span className="text-amber-600 font-medium">⚠️ Moving to next section</span>
-                    <br />
-                    <span className="text-xs text-gray-500">You cannot go back after proceeding</span>
-                  </div>
-                ) : null}
-              </div>
+                <div className="text-sm text-gray-600 text-center">
+                  {currentQuestionIndex === totalQuestionsInSection - 1 &&
+                   currentSectionIndex === sections.length - 1 ? (
+                    <span className="font-medium text-blue-600">
+                      Final submission - All sections will be submitted
+                    </span>
+                  ) : currentQuestionIndex === totalQuestionsInSection - 1 ? (
+                    <div>
+                      <span className="text-amber-600 font-medium">⚠️ Moving to next section</span>
+                      <br />
+                      <span className="text-xs text-gray-500">You cannot go back after proceeding</span>
+                    </div>
+                  ) : null}
+                </div>
 
-              <button
-                onClick={() => {
+                {/* For non-video sections show global Next */}
+                <button
+                  onClick={() => {
                     const hasVideoSection = sections.some(s => s.type === "video");
 
                     // Prevent skipping the video interview ONLY inside the Video section
@@ -769,25 +1217,48 @@ const GiveTest = ({ jdId }) => {
                       return;
                     }
 
+                    // For audio sections, the interview UI handles all questions.
+                    // Clicking Next should immediately move to the next section.
+                    if (currentSection?.type === 'audio') {
+                      if (currentSectionIndex < sections.length - 1) {
+                        setCompletedSections(prev => new Set([...prev, currentSectionIndex]));
+                        setCurrentSectionIndex(prev => prev + 1);
+                        setCurrentQuestionIndex(0);
+                      } else {
+                        toast.info('Please complete the section actions to finish the test.');
+                      }
+                      return;
+                    }
+
                     handleNext();
                 }}
-                disabled={submitting}
+                disabled={submitting || (currentSection?.type === 'audio' && !audioInterviewVisited)}
 
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
               >
                 {submitting
                   ? 'Submitting...'
-                  : currentQuestionIndex === totalQuestionsInSection - 1 &&
-                    currentSectionIndex === sections.length - 1
-                  ? 'Submit All'
+                  : currentSection?.type === 'audio'
+                  ? (audioInterviewVisited ? 'Go To Next Part' : 'Visit Audio Interview')
                   : currentQuestionIndex === totalQuestionsInSection - 1
                   ? 'Proceed to Next Section'
                   : 'Next'}
               </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
+      {/* Global submitting overlay (covers entire test while submitting) */}
+      {submitting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="relative z-10 flex flex-col items-center gap-3 p-6 bg-white bg-opacity-90 rounded-lg shadow-lg">
+            <div className="w-14 h-14 border-4 border-t-blue-600 border-gray-200 rounded-full animate-spin" />
+            <div className="text-gray-700 font-medium">Submitting test... Please wait</div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

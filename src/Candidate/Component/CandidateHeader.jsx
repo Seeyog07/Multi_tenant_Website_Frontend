@@ -33,7 +33,7 @@ const CandidateHeader = ({ onMenuToggle }) => {
                         Authorization: `Bearer ${token}`,
                     },
                 });
-                console.log(res.data.data);
+                console.log("Checking problem:", res.data);
                 
                 setUser(res.data.data);
             } catch (err) {

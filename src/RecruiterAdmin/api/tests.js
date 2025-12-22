@@ -12,9 +12,12 @@ export const testApi = {
     }
   },
 
-  submitSection: async (submissionData) => {
+  submitSection: async (questionSetId, submissionData) => {
     try {
-      const response = await fetch(`${BASE_URL}/test/submit_section`, {
+      const url = questionSetId
+        ? `${BASE_URL}/test/submit_section/${encodeURIComponent(questionSetId)}`
+        : `${BASE_URL}/test/submit_section`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

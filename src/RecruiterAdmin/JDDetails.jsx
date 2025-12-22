@@ -545,7 +545,8 @@ function JDDetails() {
                                 localStorage.setItem('filteredCandidateIds', JSON.stringify(filteredIds));
                                 navigate("/RecruiterAdmin-Dashboard/JDDetails/GenerateAssessment", {
                                     state: {
-                                        filteredCandidates: onlyFiltered
+                                        filteredCandidates: onlyFiltered,
+                                        jdData: jdDetails
                                     }
                                 });
                             }}

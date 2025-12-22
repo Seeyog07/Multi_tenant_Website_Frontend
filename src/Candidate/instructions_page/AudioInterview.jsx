@@ -14,6 +14,7 @@ export default function AudioInterview({
   const audioRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const recognitionRef = useRef(null);
+  const qaListRef = useRef([]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [status, setStatus] = useState('idle');
@@ -26,6 +27,53 @@ export default function AudioInterview({
   // Unified getter for question prompt
   const getPrompt = (q) =>
     q?.question || q?.prompt_text || q?.content?.prompt || '';
+
+  // Audio recorder
+  // const startAudioRecording = () => {
+  //   if (!streamRef.current) return;
+  //   if (isListening) stopSpeechRecognition(); // prevent conflict
+
+  //   try {
+  //     audioChunksRef.current = [];
+  //     const recorder = new MediaRecorder(streamRef.current);
+  //     recorder.ondataavailable = (e) => {
+  //       if (e.data.size > 0) audioChunksRef.current.push(e.data);
+  //     };
+  //     recorder.start(500);
+  //     audioRecorderRef.current = recorder;
+
+  //     setIsRecordingAudio(true);
+  //     setStatus('Recording audio answer...');
+  //   } catch {
+  //     alert('Cannot start audio recording.');
+  //   }
+  // };
+
+  // const stopAudioRecording = () => {
+  //   return new Promise((resolve) => {
+  //     const recorder = audioRecorderRef.current;
+  //     if (!recorder) {
+  //       setIsRecordingAudio(false);
+  //       setStatus('Recorded audio');
+  //       return resolve();
+  //     }
+
+  //     const onStop = () => {
+  //       try { recorder.removeEventListener('stop', onStop); } catch (e) {}
+  //       audioRecorderRef.current = null;
+  //       setIsRecordingAudio(false);
+  //       setStatus('Recorded audio');
+  //       resolve();
+  //     };
+
+  //     try {
+  //       recorder.addEventListener('stop', onStop);
+  //       try { recorder.stop(); } catch (e) { onStop(); }
+  //     } catch (e) {
+  //       onStop();
+  //     }
+  //   });
+  // };
 
   // Initialize camera + mic
   useEffect(() => {
@@ -46,6 +94,9 @@ export default function AudioInterview({
           videoRef.current.srcObject = stream;
           videoRef.current.muted = true; // Chrome autoplay
         }
+
+        // Auto-start audio recording once media stream is ready
+        try { startAudioRecording(); } catch (e) {}
       } catch (err) {
         console.error('Media error', err);
         alert('Please allow camera and microphone access.');
@@ -61,6 +112,12 @@ export default function AudioInterview({
       // Stop all tracks
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       if (recognitionRef.current) recognitionRef.current.stop();
+      // Ensure recorder is stopped
+      try {
+        if (audioRecorderRef.current && audioRecorderRef.current.state !== 'inactive') {
+          audioRecorderRef.current.stop();
+        }
+      } catch (e) {}
     };
   }, []);
 
@@ -71,7 +128,7 @@ export default function AudioInterview({
 
       window.speechSynthesis.cancel();
       setStatus('Speaking question...');
-
+  
       try {
         const res = await fetch(`${baseUrl}/tts_question`, {
           method: 'POST',
@@ -124,10 +181,29 @@ export default function AudioInterview({
   };
 
   const stopAudioRecording = () => {
-    if (!audioRecorderRef.current) return;
-    audioRecorderRef.current.stop();
-    setIsRecordingAudio(false);
-    setStatus('Recorded audio');
+    return new Promise((resolve) => {
+      const recorder = audioRecorderRef.current;
+      if (!recorder) {
+        setIsRecordingAudio(false);
+        setStatus('Recorded audio');
+        return resolve();
+      }
+
+      const onStop = () => {
+        try { recorder.removeEventListener('stop', onStop); } catch (e) {}
+        audioRecorderRef.current = null;
+        setIsRecordingAudio(false);
+        setStatus('Recorded audio');
+        resolve();
+      };
+
+      try {
+        recorder.addEventListener('stop', onStop);
+        try { recorder.stop(); } catch (e) { onStop(); }
+      } catch (e) {
+        onStop();
+      }
+    });
   };
 
   // STT
@@ -175,6 +251,9 @@ export default function AudioInterview({
     }
 
     let audioFile = null;
+    // Ensure recorder is stopped and final chunk is collected
+    if (isRecordingAudio) await stopAudioRecording();
+
     if (audioChunksRef.current.length) {
       const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
       const filename = `answer_${candidateId}_${currentIndex}.webm`;
@@ -190,11 +269,16 @@ export default function AudioInterview({
       timestamp: new Date().toISOString(),
     };
 
-    // Update state + call onComplete after last question
-    // Call onComplete after last question
+    // accumulate this QA so we have answers for all questions
+    qaListRef.current.push(qa);
+
+    // Call onComplete after last question with the full list
     if (currentIndex + 1 >= questions.length) {
-      onComplete([qa]);
+      onComplete([...qaListRef.current]);
+      // stop stream
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      // clear accumulated list for safety
+      qaListRef.current = [];
     }
     setCurrentAnswer('');
     stopSpeechRecognition();
@@ -312,10 +396,10 @@ export default function AudioInterview({
 
           <div className="flex gap-3 mt-3">
             <button
-              className={`px-4 py-2 rounded text-white ${isRecordingAudio ? 'bg-red-600' : 'bg-green-600'}`}
-              onClick={() => (isRecordingAudio ? stopAudioRecording() : startAudioRecording())}
+              className={`px-4 py-2 rounded text-white ${isRecordingAudio ? 'bg-red-600' : 'bg-gray-400'}`}
+              disabled
             >
-              {isRecordingAudio ? 'Stop Recording' : 'Record Answer (Audio)'}
+              {isRecordingAudio ? 'Recording...' : 'Recording...'}
             </button>
 
             <button

@@ -47,7 +47,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                 question_id: q.question_id,
                 text: content.prompt_text || content.question || '',
                 expected_keywords: content.expected_keywords || [],
-                rubric: content.rubric || '',
+                // rubric: content.rubric || '',
                 tags: [q.skill],
                 skills: [q.skill],
                 time: q.time_limit || content.suggested_time_seconds || 120,
@@ -61,7 +61,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                 id: idx + 1,
                 question_id: q.question_id,
                 text: content.prompt_text || content.question || '',
-                rubric: content.rubric || '',
+                // rubric: content.rubric || '',
                 tags: [q.skill],
                 skills: [q.skill],
                 time: q.time_limit || content.suggested_time_seconds || 180,
@@ -144,29 +144,29 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                 output_spec: question.output_spec || '',
                 examples: question.examples || []
             });
-        } else if (question.questionType === 'Audio') {
-            setEditedData({
-                ...question,
-                questionType: 'Audio',
-                timeLimit: question.time?.toString() || '120',
-                marks: '0',
-                level: question.difficulty.charAt(0).toUpperCase() + question.difficulty.slice(1) || 'Medium',
-                skills: question.skills || question.tags || [],
-                questionText: question.text,
-                expected_keywords: question.expected_keywords || [],
-                rubric: question.rubric || ''
-            });
+            } else if (question.questionType === 'Audio') {
+                setEditedData({
+                    ...question,
+                    questionType: 'Audio',
+                    timeLimit: question.time?.toString() || '120',
+                    marks: '0',
+                    level: question.difficulty.charAt(0).toUpperCase() + question.difficulty.slice(1) || 'Medium',
+                    skills: question.skills || question.tags || [],
+                    questionText: question.text,
+                    expected_keywords: question.expected_keywords || [],
+                    // rubric: question.rubric || ''
+                });
         } else if (question.questionType === 'Video') {
-            setEditedData({
-                ...question,
-                questionType: 'Video',
-                timeLimit: question.time?.toString() || '180',
-                marks: '0',
-                level: question.difficulty.charAt(0).toUpperCase() + question.difficulty.slice(1) || 'Medium',
-                skills: question.skills || question.tags || [],
-                questionText: question.text,
-                rubric: question.rubric || ''
-            });
+                setEditedData({
+                    ...question,
+                    questionType: 'Video',
+                    timeLimit: question.time?.toString() || '180',
+                    marks: '0',
+                    level: question.difficulty.charAt(0).toUpperCase() + question.difficulty.slice(1) || 'Medium',
+                    skills: question.skills || question.tags || [],
+                    questionText: question.text,
+                    // rubric: question.rubric || ''
+                });
         } else if (question.questionType === 'Text') {
             setEditedData({
                 ...question,
@@ -196,7 +196,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                 level: question.difficulty.charAt(0).toUpperCase() + question.difficulty.slice(1) || 'Medium',
                 skills: question.skills || question.tags || [],
                 questionText: question.text,
-                rubric: question.rubric || ''
+                // rubric: question.rubric || ''s
             });
         }
     };
@@ -230,12 +230,12 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
             updatedQuestion.difficulty = editedData.level.toLowerCase();
             updatedQuestion.content.prompt_text = editedData.questionText;
             updatedQuestion.content.expected_keywords = editedData.expected_keywords;
-            updatedQuestion.content.rubric = editedData.rubric;
+            // updatedQuestion.content.rubric = editedData.rubric;
         } else if (editedData.questionType === 'Video') {
             updatedQuestion.time_limit = parseInt(editedData.timeLimit);
             updatedQuestion.difficulty = editedData.level.toLowerCase();
             updatedQuestion.content.prompt_text = editedData.questionText;
-            updatedQuestion.content.rubric = editedData.rubric;
+            // updatedQuestion.content.rubric = editedData.rubric;
         } else if (editedData.questionType === 'Text') {
             updatedQuestion.time_limit = parseInt(editedData.timeLimit);
             updatedQuestion.positive_marking = parseInt(editedData.marks);
@@ -250,7 +250,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
             updatedQuestion.time_limit = parseInt(editedData.timeLimit);
             updatedQuestion.difficulty = editedData.level.toLowerCase();
             updatedQuestion.content.prompt_text = editedData.questionText;
-            updatedQuestion.content.rubric = editedData.rubric;
+            // updatedQuestion.content.rubric = editedData.rubric;
         }
         
         if (onUpdate) {
@@ -428,14 +428,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                                             </div>
                                         )}
 
-                                        {/* Video Question Details */}
-                                        {question.questionType === 'Video' && question.rubric && (
-                                            <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 mb-4">
-                                                <p className="text-xs sm:text-sm text-gray-700">
-                                                    <span className="font-semibold">Rubric:</span> {question.rubric}
-                                                </p>
-                                            </div>
-                                        )}
+                                        {/* Video Question Details - rubric display removed */}
 
                                         {/* Audio Question Details */}
                                         {question.questionType === 'Audio' && (
@@ -452,12 +445,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                                                         </div>
                                                     </div>
                                                 )}
-                                                {question.rubric && (
-                                                    <div className="bg-orange-50 border border-orange-200 rounded p-2">
-                                                        <span className="text-xs font-semibold text-gray-700">Rubric:</span>
-                                                        <p className="text-xs text-gray-600 mt-1">{question.rubric}</p>
-                                                    </div>
-                                                )}
+                                                {/* Rubric display removed intentionally */}
                                             </div>
                                         )}
 
@@ -590,7 +578,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                                     />
                                 </div>
 
-                                <div>
+                                {/* <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Level</label>
                                     <select
                                         value={editedData.level || 'Medium'}
@@ -601,7 +589,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                                         <option>Medium</option>
                                         <option>Hard</option>
                                     </select>
-                                </div>
+                                </div> */}
                             </div>
 
                             <div className="mb-6">
@@ -695,7 +683,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                             )}
 
                             {/* Video Specific Fields */}
-                            {editedData?.questionType === 'Video' && (
+                            {/* {editedData?.questionType === 'Video' && (
                                 <div className="mb-6">
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Rubric</label>
                                     <textarea
@@ -706,7 +694,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                                         placeholder="Evaluation criteria..."
                                     />
                                 </div>
-                            )}
+                            )} */}
 
                             {/* Audio Specific Fields */}
                             {editedData?.questionType === 'Audio' && (
@@ -721,7 +709,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                                             placeholder="e.g., leadership, teamwork, communication"
                                         />
                                     </div>
-                                    <div className="mb-6">
+                                    {/* <div className="mb-6">
                                         <label className="block text-sm font-medium text-gray-700 mb-2">Rubric</label>
                                         <textarea
                                             value={editedData.rubric || ''}
@@ -730,7 +718,7 @@ export default function QuestionMaker({ questions, onUpdate, onNext, onBack, loa
                                             rows="3"
                                             placeholder="Evaluation criteria..."
                                         />
-                                    </div>
+                                    </div> */}
                                 </>
                             )}
 
